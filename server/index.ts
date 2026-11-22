@@ -8,7 +8,33 @@ const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const app = express();
+  app.disable("x-powered-by");
   const server = createServer(app);
+  const isProduction = process.env.NODE_ENV === "production";
+  const contentSecurityPolicy =
+    "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self' mailto:; script-src 'self' https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; connect-src 'self' https:";
+
+  app.use((_req, res, next) => {
+    res.setHeader(
+      "Content-Security-Policy",
+      isProduction
+        ? `${contentSecurityPolicy}; upgrade-insecure-requests`
+        : contentSecurityPolicy
+    );
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader(
+      "Permissions-Policy",
+      "camera=(), microphone=(), geolocation=()"
+    );
+
+    if (isProduction) {
+      res.setHeader("Strict-Transport-Security", "max-age=31536000");
+    }
+
+    next();
+  });
 
   // Serve static files from dist/public in production
   const staticPath =

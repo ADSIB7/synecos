@@ -39,11 +39,11 @@ function trimLogFile(logPath: string, maxSize: number) {
     for (let i = lines.length - 1; i >= 0; i--) {
       const lineBytes = Buffer.byteLength(`${lines[i]}\n`, "utf-8");
       if (keptBytes + lineBytes > targetSize) break;
-      keptLines.unshift(lines[i]);
+      keptLines.push(lines[i]);
       keptBytes += lineBytes;
     }
 
-    fs.writeFileSync(logPath, keptLines.join("\n"), "utf-8");
+    fs.writeFileSync(logPath, keptLines.reverse().join("\n"), "utf-8");
   } catch {
     /* ignore trim errors */
   }
@@ -56,7 +56,7 @@ function writeToLogFile(source: LogSource, entries: unknown[]) {
   const logPath = path.join(LOG_DIR, `${source}.log`);
 
   // Format entries with timestamps
-  const lines = entries.map((entry) => {
+  const lines = entries.map(entry => {
     const ts = new Date().toISOString();
     return `[${ts}] ${JSON.stringify(entry)}`;
   });
@@ -75,8 +75,30 @@ function writeToLogFile(source: LogSource, entries: unknown[]) {
  * - Auto-trimmed when exceeding 1MB (keeps newest entries)
  */
 function vitePluginManusDebugCollector(): Plugin {
+  let isProductionBuild = false;
+
   return {
     name: "manus-debug-collector",
+
+    configResolved(config) {
+      isProductionBuild =
+        config.command === "build" && config.mode === "production";
+    },
+
+    closeBundle() {
+      if (isProductionBuild) {
+        fs.rmSync(
+          path.join(
+            PROJECT_ROOT,
+            "dist",
+            "public",
+            "__manus__",
+            "debug-collector.js"
+          ),
+          { force: true }
+        );
+      }
+    },
 
     transformIndexHtml(html) {
       if (process.env.NODE_ENV === "production") {
@@ -104,16 +126,35 @@ function vitePluginManusDebugCollector(): Plugin {
           return next();
         }
 
-        const handlePayload = (payload: any) => {
+        const handlePayload = (payload: unknown) => {
+          if (
+            !payload ||
+            typeof payload !== "object" ||
+            Array.isArray(payload)
+          ) {
+            throw new Error("Invalid log payload");
+          }
+
+          const entries = payload as Record<string, unknown>;
+
           // Write logs directly to files
-          if (payload.consoleLogs?.length > 0) {
-            writeToLogFile("browserConsole", payload.consoleLogs);
+          if (
+            Array.isArray(entries.consoleLogs) &&
+            entries.consoleLogs.length > 0
+          ) {
+            writeToLogFile("browserConsole", entries.consoleLogs);
           }
-          if (payload.networkRequests?.length > 0) {
-            writeToLogFile("networkRequests", payload.networkRequests);
+          if (
+            Array.isArray(entries.networkRequests) &&
+            entries.networkRequests.length > 0
+          ) {
+            writeToLogFile("networkRequests", entries.networkRequests);
           }
-          if (payload.sessionEvents?.length > 0) {
-            writeToLogFile("sessionReplay", payload.sessionEvents);
+          if (
+            Array.isArray(entries.sessionEvents) &&
+            entries.sessionEvents.length > 0
+          ) {
+            writeToLogFile("sessionReplay", entries.sessionEvents);
           }
 
           res.writeHead(200, { "Content-Type": "application/json" });
@@ -132,7 +173,7 @@ function vitePluginManusDebugCollector(): Plugin {
         }
 
         let body = "";
-        req.on("data", (chunk) => {
+        req.on("data", chunk => {
           body += chunk.toString();
         });
 
@@ -162,7 +203,10 @@ function vitePluginStorageProxy(): Plugin {
           return;
         }
 
-        const forgeBaseUrl = (process.env.BUILT_IN_FORGE_API_URL || "").replace(/\/+$/, "");
+        const forgeBaseUrl = (process.env.BUILT_IN_FORGE_API_URL || "").replace(
+          /\/+$/,
+          ""
+        );
         const forgeKey = process.env.BUILT_IN_FORGE_API_KEY;
 
         if (!forgeBaseUrl || !forgeKey) {
@@ -172,7 +216,10 @@ function vitePluginStorageProxy(): Plugin {
         }
 
         try {
-          const forgeUrl = new URL("v1/storage/presign/get", forgeBaseUrl + "/");
+          const forgeUrl = new URL(
+            "v1/storage/presign/get",
+            forgeBaseUrl + "/"
+          );
           forgeUrl.searchParams.set("path", key);
 
           const forgeResp = await fetch(forgeUrl, {
@@ -203,7 +250,17 @@ function vitePluginStorageProxy(): Plugin {
   };
 }
 
-const plugins = [react(), tailwindcss(), jsxLocPlugin(), vitePluginManusRuntime(), vitePluginManusDebugCollector(), vitePluginStorageProxy()];
+const plugins = [
+  react(),
+  tailwindcss(),
+  jsxLocPlugin(),
+  {
+    ...vitePluginManusRuntime(),
+    apply: "serve" as const,
+  },
+  vitePluginManusDebugCollector(),
+  vitePluginStorageProxy(),
+];
 
 export default defineConfig({
   plugins,

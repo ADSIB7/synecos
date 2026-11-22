@@ -1,3 +1,4 @@
+import type { DragEvent, MouseEvent } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
@@ -17,15 +18,41 @@ function Router() {
 }
 
 function App() {
+  const preserveNativeContextMenu = (event: MouseEvent<HTMLDivElement>) => {
+    const target = event.target;
+    if (
+      target instanceof HTMLElement &&
+      target.closest(
+        'input, textarea, select, [contenteditable="true"], [role="textbox"]'
+      )
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+  };
+
+  const preventImageDrag = (event: DragEvent<HTMLDivElement>) => {
+    if (event.target instanceof HTMLImageElement) {
+      event.preventDefault();
+    }
+  };
+
   return (
-    <ErrorBoundary>
-      <ThemeProvider defaultTheme="light">
-        <TooltipProvider>
-          <Toaster />
-          <Router />
-        </TooltipProvider>
-      </ThemeProvider>
-    </ErrorBoundary>
+    <div
+      className="app-root"
+      onContextMenu={preserveNativeContextMenu}
+      onDragStart={preventImageDrag}
+    >
+      <ErrorBoundary>
+        <ThemeProvider defaultTheme="light">
+          <TooltipProvider>
+            <Toaster />
+            <Router />
+          </TooltipProvider>
+        </ThemeProvider>
+      </ErrorBoundary>
+    </div>
   );
 }
 

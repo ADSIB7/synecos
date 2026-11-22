@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { usePersistFn } from "./usePersistFn";
 
 export interface UseCompositionReturn<
@@ -29,48 +29,57 @@ export function useComposition<
     onCompositionEnd: originalOnCompositionEnd,
   } = options;
 
-  const c = useRef(false);
-  const timer = useRef<TimerResponse | null>(null);
-  const timer2 = useRef<TimerResponse | null>(null);
+  const isComposingRef = useRef(false);
+  const compositionEndTimer = useRef<TimerResponse | null>(null);
+  const compositionResetTimer = useRef<TimerResponse | null>(null);
 
-  const onCompositionStart = usePersistFn((e: React.CompositionEvent<T>) => {
-    if (timer.current) {
-      clearTimeout(timer.current);
-      timer.current = null;
+  const clearCompositionTimers = () => {
+    if (compositionEndTimer.current) {
+      clearTimeout(compositionEndTimer.current);
+      compositionEndTimer.current = null;
     }
-    if (timer2.current) {
-      clearTimeout(timer2.current);
-      timer2.current = null;
+    if (compositionResetTimer.current) {
+      clearTimeout(compositionResetTimer.current);
+      compositionResetTimer.current = null;
     }
-    c.current = true;
-    originalOnCompositionStart?.(e);
-  });
+  };
 
-  const onCompositionEnd = usePersistFn((e: React.CompositionEvent<T>) => {
-    // 使用两层 setTimeout 来处理 Safari 浏览器中 compositionEnd 先于 onKeyDown 触发的问题
-    timer.current = setTimeout(() => {
-      timer2.current = setTimeout(() => {
-        c.current = false;
+  useEffect(() => clearCompositionTimers, []);
+
+  const onCompositionStart = usePersistFn(
+    (event: React.CompositionEvent<T>) => {
+      clearCompositionTimers();
+      isComposingRef.current = true;
+      originalOnCompositionStart?.(event);
+    }
+  );
+
+  const onCompositionEnd = usePersistFn((event: React.CompositionEvent<T>) => {
+    // Safari can dispatch compositionend before the associated keydown event.
+    clearCompositionTimers();
+    compositionEndTimer.current = setTimeout(() => {
+      compositionResetTimer.current = setTimeout(() => {
+        isComposingRef.current = false;
+        compositionEndTimer.current = null;
+        compositionResetTimer.current = null;
       });
     });
-    originalOnCompositionEnd?.(e);
+    originalOnCompositionEnd?.(event);
   });
 
-  const onKeyDown = usePersistFn((e: React.KeyboardEvent<T>) => {
-    // 在 composition 状态下，阻止 ESC 和 Enter（非 shift+Enter）事件的冒泡
-    if (
-      c.current &&
-      (e.key === "Escape" || (e.key === "Enter" && !e.shiftKey))
-    ) {
-      e.stopPropagation();
+  const onKeyDown = usePersistFn((event: React.KeyboardEvent<T>) => {
+    const isCompositionSubmitKey =
+      event.key === "Escape" || (event.key === "Enter" && !event.shiftKey);
+
+    if (isComposingRef.current && isCompositionSubmitKey) {
+      event.stopPropagation();
       return;
     }
-    originalOnKeyDown?.(e);
+
+    originalOnKeyDown?.(event);
   });
 
-  const isComposing = usePersistFn(() => {
-    return c.current;
-  });
+  const isComposing = usePersistFn(() => isComposingRef.current);
 
   return {
     onCompositionStart,
